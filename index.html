@@ -1,58 +1,49 @@
 <script>
-const sampleData = [
-  // Removed demo data – live data will be loaded
-];
+const stationSelectType = { current: null };
+const fuelTypeSelector = document.getElementById('fuel-type');
+const localPriceInput = document.getElementById('local-price');
+const cheaperPriceInput = document.getElementById('cheaper-price');
+const findPriceButtons = document.querySelectorAll('.find-price-btn');
 
-let currentTargetInput = null;
+findPriceButtons.forEach(button => {
+  button.addEventListener('click', async () => {
+    const targetInput = button.previousElementSibling;
+    stationSelectType.current = targetInput;
+    document.getElementById('fuel-popup').style.display = 'flex';
 
-document.querySelectorAll('.price-field button').forEach(btn => {
-  btn.addEventListener('click', () => {
-    currentTargetInput = btn.previousElementSibling;
-    document.getElementById('fuel-popup').style.display = 'block';
-    document.getElementById('fuel-search-results').innerHTML = 'Loading...';
+    const popupContent = document.getElementById('fuel-popup-content');
+    popupContent.innerHTML = '<p>Loading stations...</p>';
 
-    const fuelType = document.getElementById('fuel-type').value;
+    try {
+      const res = await fetch('/api/fuel');
+      const data = await res.json();
+      const fuelType = fuelTypeSelector.value;
 
-    fetch('/api/fuel')
-      .then(res => res.json())
-      .then(data => {
-        const stations = data.stations || [];
-        const results = stations.filter(station => {
-          const price = fuelType === 'petrol' ? station.unleaded : station.diesel;
-          return price !== null;
+      if (!data.stations || data.stations.length === 0) {
+        popupContent.innerHTML = '<p>No stations found.</p>';
+        return;
+      }
+
+      popupContent.innerHTML = data.stations.map(station => {
+        const price = fuelType === 'diesel' ? station.diesel : station.unleaded;
+        if (price === null) return '';
+        return `<div class="station" data-price="${price}">
+          <strong>${station.brand}</strong> - ${station.postcode}<br>
+          £${price.toFixed(1)} / L
+        </div>`;
+      }).join('') || '<p>No prices available.</p>';
+
+      document.querySelectorAll('.station').forEach(el => {
+        el.addEventListener('click', () => {
+          const price = el.getAttribute('data-price');
+          stationSelectType.current.value = price;
+          document.getElementById('fuel-popup').style.display = 'none';
         });
-
-        if (results.length === 0) {
-          document.getElementById('fuel-search-results').innerHTML = '<p>No live data available.</p>';
-          return;
-        }
-
-        const html = results.map(station => {
-          const price = fuelType === 'petrol' ? station.unleaded : station.diesel;
-          return `
-            <div class="fuel-option" data-price="${price}">
-              <strong>${station.brand}</strong> – ${station.postcode}<br>
-              ${fuelType.toUpperCase()}: <strong>${price}p</strong>
-            </div>
-          `;
-        }).join('');
-
-        document.getElementById('fuel-search-results').innerHTML = html;
-
-        document.querySelectorAll('.fuel-option').forEach(opt => {
-          opt.addEventListener('click', () => {
-            if (currentTargetInput) {
-              currentTargetInput.value = (parseFloat(opt.dataset.price) / 100).toFixed(2); // Convert to £
-              currentTargetInput.dispatchEvent(new Event('input'));
-            }
-            document.getElementById('fuel-popup').style.display = 'none';
-          });
-        });
-      })
-      .catch(err => {
-        console.error(err);
-        document.getElementById('fuel-search-results').innerHTML = '<p>Error loading fuel data.</p>';
       });
+
+    } catch (error) {
+      popupContent.innerHTML = '<p>Failed to load station data.</p>';
+    }
   });
 });
 
