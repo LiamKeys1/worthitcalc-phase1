@@ -1,45 +1,71 @@
 const fetch = require("node-fetch");
 
-const RETAILERS = [
-  { brand: "Asda", url: "https://storelocator.asda.com/fuel_prices_data.json" },
-  { brand: "Tesco", url: "https://www.tesco.com/fuel_prices/fuel_prices_data.json" },
-  { brand: "Sainsbury’s", url: "https://api.sainsburys.co.uk/v1/exports/latest/fuel_prices_data.json" },
-  { brand: "Morrisons", url: "https://www.morrisons.com/fuel-prices/fuel.json" }
-  // Skipping Shell and BP for now to reduce errors/timeouts
-];
+exports.handler = async function (event, context) {
+  const sources = [
+    {
+      brand: "Asda",
+      url: "https://www.asda.com/api/feeds/store/petrol-prices",
+    },
+    {
+      brand: "Morrisons",
+      url: "https://my.morrisons.com/storefinder/api/fuel-prices.json",
+    },
+    {
+      brand: "Sainsbury's",
+      url: "https://www.sainsburys.co.uk/webapp/wcs/stores/servlet/gb/groceries/fuel-prices.json",
+    },
+    {
+      brand: "Tesco",
+      url: "https://www.tesco.com/fuel_prices/fuel_prices.json",
+    },
+    {
+      brand: "Co-op",
+      url: "https://www.coop.co.uk/fuel-price-feed.json",
+    },
+    {
+      brand: "Shell",
+      url: "https://www.shell.co.uk/fuel_prices.json",
+    },
+    {
+      brand: "BP",
+      url: "https://www.bp.com/fuel-prices.json",
+    },
+    {
+      brand: "Texaco",
+      url: "https://www.texaco.co.uk/fuel_prices.json",
+    }
+  ];
 
-const timeout = (ms) =>
-  new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms));
+  let stations = [];
 
-exports.handler = async function () {
-  const stations = [];
-
-  const results = await Promise.allSettled(RETAILERS.map(async (r) => {
+  for (const r of sources) {
     try {
-      const res = await Promise.race([
-        fetch(r.url),
-        timeout(4000) // 4 second timeout per retailer
-      ]);
-      if (!res.ok) throw new Error(`Fetch ${r.brand} failed`);
+      const res = await fetch(r.url);
+      const json = await res.json();
+      const list = Array.isArray(json) ? json : json.stations || json.data || [];
 
-      const data = await res.json();
-      const list = data.stations || data.sites || data || [];
       for (const s of list) {
+        const priceObj = s.prices || {};
+
         stations.push({
           brand: r.brand,
           name: s.name || s.site || "",
           postcode: s.postcode || s.post_code || "",
-          unleaded: s.e5 || s.unleaded || s.price_e5 || null,
-          diesel: s.b7 || s.diesel || s.price_b7 || null
+          unleaded: priceObj.E5 != null ? priceObj.E5 : priceObj.E10 || null,
+          diesel: priceObj.B7 || null,
         });
       }
     } catch (err) {
-      console.warn(`Skipping ${r.brand}`, err.message);
+      console.error(`Error loading ${r.brand}:`, err.message);
     }
-  }));
+  }
 
   return {
     statusCode: 200,
-    body: JSON.stringify({ stations })
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+    },
+    body: JSON.stringify({ stations }),
   };
 };
