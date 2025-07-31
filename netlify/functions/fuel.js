@@ -1,71 +1,51 @@
 const fetch = require("node-fetch");
 
-exports.handler = async function (event, context) {
-  const sources = [
-    {
-      brand: "Asda",
-      url: "https://www.asda.com/api/feeds/store/petrol-prices",
-    },
-    {
-      brand: "Morrisons",
-      url: "https://my.morrisons.com/storefinder/api/fuel-prices.json",
-    },
-    {
-      brand: "Sainsbury's",
-      url: "https://www.sainsburys.co.uk/webapp/wcs/stores/servlet/gb/groceries/fuel-prices.json",
-    },
-    {
-      brand: "Tesco",
-      url: "https://www.tesco.com/fuel_prices/fuel_prices.json",
-    },
-    {
-      brand: "Co-op",
-      url: "https://www.coop.co.uk/fuel-price-feed.json",
-    },
-    {
-      brand: "Shell",
-      url: "https://www.shell.co.uk/fuel_prices.json",
-    },
-    {
-      brand: "BP",
-      url: "https://www.bp.com/fuel-prices.json",
-    },
-    {
-      brand: "Texaco",
-      url: "https://www.texaco.co.uk/fuel_prices.json",
-    }
-  ];
+// Simplified list: start with two reliable sources
+const RETAILERS = [
+  {
+    brand: "Asda",
+    url: "https://storelocator.asda.com/fuel_prices_data.json"
+  },
+  {
+    brand: "Tesco",
+    url: "https://www.tesco.com/fuel_prices/fuel_prices_data.json"
+  }
+];
 
-  let stations = [];
+const timeout = (ms, promise) => new Promise((res, rej) =>
+  setTimeout(() => rej(new Error("timeout")), ms)
+    .race([promise])
+);
 
-  for (const r of sources) {
+exports.handler = async function() {
+  const stations = [];
+
+  await Promise.allSettled(RETAILERS.map(async r => {
     try {
-      const res = await fetch(r.url);
+      const res = await timeout(3000, fetch(r.url)); // 3s timeout
+      if (!res.ok) throw new Error(r.brand + " fetch failed");
+
       const json = await res.json();
-      const list = Array.isArray(json) ? json : json.stations || json.data || [];
-
-      for (const s of list) {
-        const priceObj = s.prices || {};
-
+      const list = json.stations || json.sites || json.data || [];
+      list.forEach(s => {
+        const p = s.prices || {};
         stations.push({
           brand: r.brand,
           name: s.name || s.site || "",
           postcode: s.postcode || s.post_code || "",
-          unleaded: priceObj.E5 != null ? priceObj.E5 : priceObj.E10 || null,
-          diesel: priceObj.B7 || null,
+          unleaded: p.E5 != null ? p.E5 : p.E10 || null,
+          diesel: p.B7 || null
         });
-      }
-    } catch (err) {
-      console.error(`Error loading ${r.brand}:`, err.message);
+      });
+    } catch (e) {
+      console.warn("Skip", r.brand, e.message);
     }
-  }
+  }));
 
   return {
     statusCode: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-    },
-    body: JSON.stringify({ stations }),
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ stations })
   };
 };
+
