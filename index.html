@@ -1,53 +1,129 @@
-<script>
-const stationSelectType = { current: null };
-const fuelTypeSelector = document.getElementById('fuel-type');
-const localPriceInput = document.getElementById('local-price');
-const cheaperPriceInput = document.getElementById('cheaper-price');
-const findPriceButtons = document.querySelectorAll('.find-price-btn');
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Worth It Calc</title>
+  <style>
+    body { font-family: sans-serif; padding: 2em; max-width: 600px; margin: auto; }
+    h1 { font-size: 2em; }
+    label { display: block; margin-top: 1em; }
+    input, select, button { padding: 0.5em; width: 100%; margin-top: 0.2em; }
+    #results { margin-top: 2em; padding: 1em; border: 1px solid #ccc; border-radius: 8px; background: #f9f9f9; }
+    .popup { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 10; align-items: center; justify-content: center; }
+    .popup-content { background: white; padding: 1em; border-radius: 8px; max-height: 80vh; overflow: auto; width: 90%; max-width: 500px; }
+    .station { padding: 0.5em; border-bottom: 1px solid #ddd; cursor: pointer; }
+    .station:hover { background: #eef; }
+  </style>
+</head>
+<body>
+  <h1>Is it Worth It?</h1>
+  
+  <label for="fuelType">Fuel Type</label>
+  <select id="fuelType">
+    <option value="unleaded">Petrol (Unleaded)</option>
+    <option value="diesel">Diesel</option>
+  </select>
 
-findPriceButtons.forEach(button => {
-  button.addEventListener('click', async () => {
-    const targetInput = button.previousElementSibling;
-    stationSelectType.current = targetInput;
-    document.getElementById('fuel-popup').style.display = 'flex';
+  <label for="localPrice">Local Fuel Price (p/L)</label>
+  <input type="number" id="localPrice" step="0.1">
+  <button onclick="openFuelPopup('localPrice')">Find Price</button>
 
-    const popupContent = document.getElementById('fuel-popup-content');
-    popupContent.innerHTML = '<p>Loading stations...</p>';
+  <label for="cheaperPrice">Cheaper Fuel Price (p/L)</label>
+  <input type="number" id="cheaperPrice" step="0.1">
+  <button onclick="openFuelPopup('cheaperPrice')">Find Price</button>
 
-    try {
-      const res = await fetch('/api/fuel');
-      const data = await res.json();
-      const fuelType = fuelTypeSelector.value;
+  <label for="tripDistance">Trip Distance (miles)</label>
+  <input type="number" id="tripDistance" step="0.1">
 
-      if (!data.stations || data.stations.length === 0) {
-        popupContent.innerHTML = '<p>No stations found.</p>';
+  <label for="mpg">Your Vehicle MPG</label>
+  <input type="number" id="mpg" step="0.1">
+
+  <button onclick="calculate()">Calculate</button>
+
+  <div id="results"></div>
+
+  <!-- Fuel Price Popup -->
+  <div id="fuel-popup" class="popup">
+    <div class="popup-content">
+      <button onclick="closeFuelPopup()" style="float:right">Close ✖</button>
+      <h2>Select a Station</h2>
+      <input type="text" id="searchInput" placeholder="Enter town or postcode" oninput="filterStations()">
+      <div id="stationList">Loading...</div>
+    </div>
+  </div>
+
+  <script>
+    let allStations = [];
+    let activeInput = null;
+
+    async function openFuelPopup(inputId) {
+      activeInput = inputId;
+      document.getElementById('fuel-popup').style.display = 'flex';
+      if (allStations.length === 0) {
+        try {
+          const res = await fetch('/api/fuel');
+          const data = await res.json();
+          allStations = data.stations.filter(station => station.unleaded || station.diesel);
+          filterStations();
+        } catch (e) {
+          document.getElementById('stationList').innerHTML = '<p>Failed to load stations.</p>';
+        }
+      }
+    }
+
+    function closeFuelPopup() {
+      document.getElementById('fuel-popup').style.display = 'none';
+      document.getElementById('searchInput').value = '';
+    }
+
+    function filterStations() {
+      const fuelType = document.getElementById('fuelType').value;
+      const term = document.getElementById('searchInput').value.trim().toLowerCase();
+      const results = allStations.filter(s =>
+        s.postcode.toLowerCase().includes(term) ||
+        (s.brand && s.brand.toLowerCase().includes(term))
+      );
+
+      const stationList = results.map(s => `
+        <div class="station" onclick="selectStation(${s[fuelType]}, '${s.brand}', '${s.postcode}')">
+          <strong>${s.brand}</strong> – ${s.postcode}<br>
+          ${fuelType === 'unleaded' ? 'Petrol' : 'Diesel'}: ${s[fuelType]}p
+        </div>
+      `).join('') || '<p>No matches found.</p>';
+
+      document.getElementById('stationList').innerHTML = stationList;
+    }
+
+    function selectStation(price, brand, postcode) {
+      document.getElementById(activeInput).value = price;
+      closeFuelPopup();
+    }
+
+    function calculate() {
+      const local = parseFloat(document.getElementById('localPrice').value);
+      const cheaper = parseFloat(document.getElementById('cheaperPrice').value);
+      const miles = parseFloat(document.getElementById('tripDistance').value);
+      const mpg = parseFloat(document.getElementById('mpg').value);
+
+      if (isNaN(local) || isNaN(cheaper) || isNaN(miles) || isNaN(mpg)) {
+        document.getElementById('results').innerHTML = "<p>Please fill in all fields.</p>";
         return;
       }
 
-      popupContent.innerHTML = data.stations.map(station => {
-        const price = fuelType === 'diesel' ? station.diesel : station.unleaded;
-        if (price === null) return '';
-        return `<div class="station" data-price="${price}">
-          <strong>${station.brand}</strong> - ${station.postcode}<br>
-          £${price.toFixed(1)} / L
-        </div>`;
-      }).join('') || '<p>No prices available.</p>';
+      const litresLocal = (10 / local) * 1000;
+      const litresCheaper = (10 / cheaper) * 1000;
+      const tripCost = (miles / mpg) * (cheaper / 4.546);
+      const saving = ((local - cheaper) / 100) * litresLocal - tripCost;
 
-      document.querySelectorAll('.station').forEach(el => {
-        el.addEventListener('click', () => {
-          const price = el.getAttribute('data-price');
-          stationSelectType.current.value = price;
-          document.getElementById('fuel-popup').style.display = 'none';
-        });
-      });
-
-    } catch (error) {
-      popupContent.innerHTML = '<p>Failed to load station data.</p>';
+      document.getElementById('results').innerHTML = `
+        <p>Local: ${litresLocal.toFixed(2)}L</p>
+        <p>Cheaper: ${litresCheaper.toFixed(2)}L</p>
+        <p>Cost of trip: £${tripCost.toFixed(2)}</p>
+        <p>Net savings: £${saving.toFixed(2)}</p>
+        <h2>🤔 Is it worth it?</h2>
+      `;
     }
-  });
-});
-
-document.getElementById('close-fuel-popup').addEventListener('click', () => {
-  document.getElementById('fuel-popup').style.display = 'none';
-});
-</script>
+  </script>
+</body>
+</html>
